@@ -68,7 +68,7 @@ def gradient_descent(x, y, m, c, learning_rate, num_iterations):
 # Initial guesses and hyperparameters
 initial_m = 0.0  # Initial guess for the slopes
 initial_c = 0.0  # Initial guess for the intercept
-learning_rate = 0.00017
+learning_rate = 0.00007
 num_iterations = len(x1)
 
 m1, c = gradient_descent(x1, y, initial_m, initial_c, learning_rate, num_iterations)
