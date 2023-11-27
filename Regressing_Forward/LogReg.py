@@ -2,72 +2,77 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Reading the data
-data = pd.read_csv("/Users/abhudaysingh/Downloads/weatherAUS.csv")
+def logreg(file):
+    # Reading the data
+    data = pd.read_csv(file)
 
-# Extract feature(s) (x) and target variable (y)
-#x = data[['Rainfall', 'MinTemp', 'MaxTemp', 'WindGustSpeed', 'WindSpeed9am', 'WindSpeed3pm', 'Humidity9am', 'Humidity3pm', 'Pressure9am', 'Pressure3pm', 'Temp9am', 'Temp3pm']]
-x = data[['Rainfall', 'MinTemp', 'MaxTemp', 'WindGustSpeed', 'WindSpeed9am', 'WindSpeed3pm', 'Humidity9am', 'Humidity3pm', 'Pressure9am', 'Pressure3pm', 'Temp9am', 'Temp3pm']]
+    # Extract feature(s) (x) and target variable (y)
+    x = data[['Pclass', 'Age', 'Siblings/Spouses Aboard', 'Parents/Children Aboard', 'Fare']]
+    y = data['Survived']
 
-y = data['RainTomorrow']
+    # Feature scaling
+    def feature_scaling(a):
+        a = (a - a.mean()) / a.std()
+        return a
 
-# Convert 'Yes' and 'No' to 1 and 0
-y = y.map({'Yes': 1, 'No': 0})
+    x = feature_scaling(x)
 
-# Feature scaling
-x = (x - x.mean()) / x.std()
+    # Convert to NumPy arrays
+    x_array = x.values
+    y_array = y.values
 
-# Add a column of ones to the features for the intercept term
-x['intercept'] = 1
+    def sigmoid(z):
+        return 1 / (1 + np.exp(-z))
 
-# Convert to NumPy arrays
-x_array = x.values
-y_array = y.values
+    def logistic_regression(x, y, num_iterations, learning_rate):
+        num_samples, num_features = x.shape
+        intercept = np.ones((num_samples, 1))
+        x = np.concatenate((intercept, x), axis=1)
+        weights = np.zeros(num_features + 1)
+        
+        for i in range(num_iterations):
+            scores = np.dot(x, weights)
+            predictions = sigmoid(scores)
+            gradient = np.dot(x.T, (predictions - y)) / num_samples
+            weights -= learning_rate * gradient
+        
+        return weights
 
-def sigmoid(z):
-    return 1 / (1 + np.exp(-z))
+    # Train logistic regression model using your function
+    num_iterations = 1000
+    learning_rate = 0.007
+    weights = logistic_regression(x_array, y_array, num_iterations, learning_rate)
 
-def gradient_descent(X, y, theta, learning_rate, num_iterations, lambda_):
-    m, n = X.shape
-    
-    for _ in range(num_iterations):
-        z = np.dot(X, theta)
-        f_mc = sigmoid(z)
-        err = f_mc - y
+    # Predict probabilities on the entire dataset
+    intercept_all = np.ones((x_array.shape[0], 1))
+    x_all = np.concatenate((intercept_all, x_array), axis=1)
+    predicted_probs = sigmoid(np.dot(x_all, weights))
 
-        dm = np.dot(X.T, err) / m
-        dc = np.sum(err) / m
+    def predict_labels(x, weights, threshold=0.5):
+        # Add bias term to features
+        intercept = np.ones((x.shape[0], 1))
+        x = np.concatenate((intercept, x), axis=1)
+        
+        # Predict probabilities
+        predicted_probs = sigmoid(np.dot(x, weights))
+        
+        # Convert probabilities to binary predictions using a threshold
+        predicted_labels = (predicted_probs >= threshold).astype(int)
+        
+        return predicted_labels
 
-        # Add regularization term to the gradient with respect to the slope coefficients
-        dm[1:] += (lambda_ / m) * theta[1:]
+    def accuracy(y_true, y_pred):
+        # Calculate accuracy
+        correct_predictions = np.sum(y_true == y_pred)
+        total_samples = len(y_true)
+        accuracy = correct_predictions / total_samples
+        
+        return accuracy
 
-        # Update parameters using the learning rate
-        theta -= learning_rate * dm
-        theta[0] -= learning_rate * dc
+    # Use the trained weights to make predictions on the training data
+    predicted_labels_train = predict_labels(x_array, weights)
 
-        # Check for nan in weights
-        if np.isnan(np.sum(theta)):
-            print("Weights became nan. Stopping optimization.")
-            break
-
-    return theta
-
-# Initial guesses and hyperparameters
-initial_theta = np.zeros(x_array.shape[1])
-learning_rate = 0.0001
-num_iterations = 15000
-lambda_ = 0.1
-
-# Perform gradient descent
-theta = gradient_descent(x_array, y_array, initial_theta, learning_rate, num_iterations, lambda_)
-#print(x_array) Working Proper,y
-print(theta) #Problem Here
-# Predict probabilities
-predicted_probs = sigmoid(np.clip(np.dot(x_array, theta), -500, 500))  # Clip values to prevent overflow
-#print(predicted_probs) problem here due to theta
-# Plot the predicted probabilities against the actual values
-plt.scatter(predicted_probs, y, color="blue")
-plt.xlabel("Predicted Probabilities")
-plt.ylabel("Actual Values")
-plt.title("Logistic Regression Predictions")
-plt.show()
+    # Calculate accuracy on the training data
+    accuracy_train = accuracy(y_array, predicted_labels_train)
+    print(f" Accuracy: {accuracy_train * 100:.2f}%")
+logreg("/Users/abhudaysingh/Downloads/test (1).csv")
