@@ -1,131 +1,204 @@
+#include <iostream>
 #include <ros/ros.h>
 #include <nav_msgs/OccupancyGrid.h>
 #include <nav_msgs/Path.h>
-#include <iostream>
+#include <geometry_msgs/PoseStamped.h>
 #include <vector>
-#include <queue>
 #include <cmath>
-#include <sstream>
-#include <algorithm>
+#include <queue>
+#include <limits>
+#include <unordered_set>
 #include <memory>
-#include <geometry_msgs/PoseStamped>
 
-// using common std commands
-using std::cout;
-using std::endl;
-
+// Define your Node structure for A* algorithm
 struct Node {
-    int x, y;
-    double cost;
-    double heuristic;
+    int i, j;
+    float f, g, h;
     Node* parent;
 
-    Node(int x_, int y_, double cost_, double heuristic_, Node* parent_) :
-            x(x_), y(y_), cost(cost_), heuristic(heuristic_), parent(parent_) {}
+    Node(int _i, int _j) : i(_i), j(_j), f(0), g(std::numeric_limits<float>::infinity()), h(0), parent(nullptr) {}
 
-    double totalCost() const {
-        return cost + heuristic;
+    float dist(const Node& other) const {
+        return std::sqrt(std::pow(i - other.i, 2) + std::pow(j - other.j, 2));
+    }
+
+    bool operator==(const Node& other) const {
+        return i == other.i && j == other.j;
     }
 };
 
-// structure to compare nodes 
-struct CompareNodes {
-    bool operator()(const Node* lhs, const Node* rhs) const {
-        return lhs->totalCost() > rhs->totalCost();
+// Hash function for Node to use in unordered_set
+namespace std {
+template<>
+struct hash<Node> {
+    size_t operator()(const Node& node) const {
+        return std::hash<int>()(node.i) ^ std::hash<int>()(node.j);
     }
 };
-
-// Function to calculate Euclidean distance heuristic
-double calculateHeuristic(int x1, int y1, int x2, int y2) {
-    return std::sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2));
 }
 
-std::vector<Node*> astar(Node* start, Node* goal, const std::vector<std::vector<int>>& map, int width, int height) {
-    std::priority_queue<Node*, std::vector<Node*>, CompareNodes> openSet;
-    std::vector<std::vector<bool>> visited(height, std::vector<bool>(width, false));
-    openSet.push(start);
+// Structure to compare nodes for priority queue
+struct CompareNodes {
+    bool operator()(const Node& a, const Node& b) const {
+        return a.f > b.f;
+    }
+};
 
-    while (!openSet.empty()) {
-        Node* current = openSet.top();
-        openSet.pop();
+// A* algorithm implementation
+class AStarPathFinder {
+public:
+    AStarPathFinder(const std::vector<std::vector<int>>& _map, const Node& _start, const Node& _end, bool _allowDiagonals)
+        : map(_map), start(_start), end(_end), allowDiagonals(_allowDiagonals) {}
 
-        if (current->x == goal->x && current->y == goal->y) {
-            std::vector<Node*> path;
-            while (current != nullptr) {
-                path.push_back(current);
-                current = current->parent;
+    std::vector<Node> findPath() {
+        std::vector<Node> openSet;
+        std::unordered_set<Node> closedSet;
+
+        openSet.push_back(start);
+
+        int maxIterations = 1000; // Example maximum number of iterations
+        int iterations = 0;
+
+        while (!openSet.empty() && iterations < maxIterations) {
+            auto current = openSet.back();
+            openSet.pop_back();
+
+            if (current == end) {
+                auto path = reconstructPath(&current);
+                return path;
             }
-            std::reverse(path.begin(), path.end());
-            return path;
-        }
 
-        visited[current->y][current->x] = true;
+            closedSet.insert(current);
 
-        // Generate neighbor nodes
-        for (int dx = -1; dx <= 1; ++dx) {
-            for (int dy = -1; dy <= 1; ++dy) {
-                if (dx == 0 && dy == 0) continue; // Skip current node
-                int nx = current->x + dx;
-                int ny = current->y + dy;
+            for (auto& neighbor : getNeighbors(current)) {
+                if (closedSet.find(neighbor) != closedSet.end()) continue;
 
-                if (nx >= 0 && nx < width && ny >= 0 && ny < height && map[ny][nx] == 0 && !visited[ny][nx]) {
-                    double newCost = current->cost + 1; // Assuming uniform cost for all movements
-                    Node* neighbor = new Node(nx, ny, newCost, calculateHeuristic(nx, ny, goal->x, goal->y), current);
-                    openSet.push(neighbor);
+                float tentativeG = current.g + current.dist(neighbor);
+
+                auto it = std::find(openSet.begin(), openSet.end(), neighbor);
+                if (it == openSet.end() || tentativeG < it->g) {
+                    neighbor.g = tentativeG;
+                    neighbor.h = neighbor.dist(end);
+                    neighbor.f = neighbor.g + neighbor.h;
+                    neighbor.parent = &current;
+                    openSet.push_back(neighbor);
                 }
             }
+
+            iterations++;
         }
+
+        return {}; // No path found within the maximum iterations
     }
 
-    return {}; // No path found
-}
 
-void callBack(const nav_msgs::OccupancyGrid::ConstPtr& data) {
-    int width = data->info.width;
-    int height = data->info.height;
-    double resolution = data->info.resolution;
-    cout << "width: " << width << endl;
-    cout << "height: " << height << endl;
-    std::vector<std::vector<int>> map(height, std::vector<int>(width));
+private:
+    const std::vector<std::vector<int>>& map;
+    Node start;
+    Node end;
+    bool allowDiagonals;
 
-    for (int i = 0; i < height; i++) {
-        for (int j = 0; j < width; j++) {
-            int index = i * width + j;
-            map[i][j] = data->data[index];
+    std::vector<Node> reconstructPath(Node* current) {
+        std::vector<Node> path;
+        while (current != nullptr) {
+            path.emplace_back(*current);
+            current = current->parent;
         }
+        std::reverse(path.begin(), path.end());
+        return path;
     }
 
-    Node* start = new Node(10, 10, 0, 0, nullptr); // Assuming start point coordinates
-    Node* goal = new Node(50, 50, 0, 0, nullptr); // Assuming goal point coordinates
+    std::vector<Node> getNeighbors(const Node& node) const {
+        std::vector<Node> neighbors;
+        int di[8] = {1, 1, 0, -1, -1, -1, 0, 1};
+        int dj[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+        int numDirs = allowDiagonals ? 8 : 4;
 
-    std::vector<Node*> path = astar(start, goal, map, width, height);
+        for (int d = 0; d < numDirs; ++d) {
+            int ni = node.i + di[d];
+            int nj = node.j + dj[d];
+            if (ni >= 0 && ni < map.size() && nj >= 0 && nj < map[0].size() && map[ni][nj] == 0) {
+                neighbors.push_back(Node(ni, nj));
+            }
+        }
 
+        return neighbors;
+    }
+};
+
+// Global variables for storing map data
+std::vector<std::vector<int>> mapData;
+int mapWidth, mapHeight;
+
+// Function to publish the path as a nav_msgs::Path message
+void publishPath(const std::vector<Node>& path) {
     ros::NodeHandle nh;
     ros::Publisher path_pub = nh.advertise<nav_msgs::Path>("path", 1);
+
     nav_msgs::Path path_msg;
     path_msg.header.frame_id = "map";
 
-    for (auto it = path.rbegin(); it != path.rend(); ++it) {
+    for (const auto& node : path) {
         geometry_msgs::PoseStamped pose;
-        pose.pose.position.x = (*it)->x * resolution;
-        pose.pose.position.y = (*it)->y * resolution;
+        pose.pose.position.x = node.i;
+        pose.pose.position.y = node.j;
         pose.pose.orientation.w = 1.0;
         path_msg.poses.push_back(pose);
     }
 
     path_pub.publish(path_msg);
+}
 
-    // Clean up allocated memory
-    for (Node* node : path) {
-        delete node;
+// Function to check if a position is valid
+bool isValidPosition(const Node& position) {
+    return position.i >= 0 && position.i < mapHeight && position.j >= 0 && position.j < mapWidth;
+}
+
+// Callback function for map data
+void mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& data) {
+    mapWidth = data->info.width;
+    mapHeight = data->info.height;
+    mapData.clear();
+    mapData.resize(mapHeight, std::vector<int>(mapWidth));
+
+    // Copy map data to vector
+    for (int i = 0; i < mapHeight; ++i) {
+        for (int j = 0; j < mapWidth; ++j) {
+            mapData[i][j] = data->data[i * mapWidth + j];
+        }
+    }
+
+    // Example start and end nodes
+    Node start(10,10);
+    Node end(40,40);
+
+    // Check if the start and end points are within the map boundaries
+    if (!isValidPosition(start) || !isValidPosition(end)) {
+        ROS_WARN("Invalid start or end point position");
+        return;
+    }
+
+    // Print the coordinates of the start and end points
+    ROS_INFO("Start point: (%d, %d)", start.i, start.j);
+    ROS_INFO("End point: (%d, %d)", end.i, end.j);
+
+    // Create AStarPathFinder object and find path
+    AStarPathFinder pathFinder(mapData, start, end, true);
+    std::vector<Node> path = pathFinder.findPath();
+
+    // Check if path is found
+    if (path.empty()) {
+        ROS_WARN("No path found");
+    } else {
+        // Publish the path
+        publishPath(path);
     }
 }
 
-int main(int argc, char ** argv) {
-    // initialise ros
-    ros::init(argc, argv, "AStar");
-    ros::NodeHandle n;
-    ros::Subscriber map = n.subscribe("map", 1, callBack); // subscribing to the map topic
+int main(int argc, char** argv) {
+    ros::init(argc, argv, "path_planner");
+    ros::NodeHandle nh;
+    ros::Subscriber map_sub = nh.subscribe("map", 1, mapCallback);
     ros::spin();
     return 0;
 }
